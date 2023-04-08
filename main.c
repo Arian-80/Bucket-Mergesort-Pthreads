@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <math.h>
 #include <time.h>
 #include <pthread.h>
@@ -28,6 +27,10 @@ struct MergesortData {
     pthread_barrier_t syncBarrier;
 };
 
+/*
+ * The majority of the sequential code in this project is replicated across..-
+ * -.. all versions of this algorithm - MPI, Pthreads and OpenMP.
+ */
 int sort_buckets(struct BucketsortData data);
 void initialiseBuckets(struct Bucket* buckets, int bucketCount);
 int fillBuckets(const float* floatArrayToSort, int size,
@@ -142,7 +145,6 @@ int bucketsort(float* floatArrayToSort, int arraySize, int threadCount,
         int k = 0;
         for (int i = 0; i < bucketCount; i++) {
             for (int j = 0; j < sizes[i]; j++) {
-//                printf("%f\n", numbersInBuckets[i][j]);
                 floatArrayToSort[k] = numbersInBuckets[i][j];
                 k++;
             }
@@ -253,6 +255,11 @@ int sort_buckets(struct BucketsortData data) {
         result = mergesort_parallel(numbersInBuckets[i],
                                     itemsInBucket, data.extraThreads);
         if (!result) return 0;
+        for (int j = 1; j < itemsInBucket; j++) {
+            if (numbersInBuckets[i][j] < numbersInBuckets[i][j-1]) {
+                printf("Bucket %d, index %d, values %f, %f, %f\n", i, j, numbersInBuckets[i][j], numbersInBuckets[i][j-1], numbersInBuckets[i][j+1]);
+            }
+        }
     }
     return 1;
 }
@@ -260,11 +267,9 @@ int sort_buckets(struct BucketsortData data) {
 int mergesort_parallel(float* floatArrayToSort, int size, int threadCount) {
     if (threadCount == 1) { // sequential
         mergesort(floatArrayToSort, 0, size - 1);
-//        for (int i = 0; i < size; i++) {
-//            if (floatArrayToSort[i])
-//        }
         return 1;
     }
+    else if (threadCount > size)  threadCount = size; // Too many threads
 
     pthread_t* threads = (pthread_t*) malloc(threadCount * sizeof(pthread_t));
     if (!threads) {
@@ -279,29 +284,46 @@ int mergesort_parallel(float* floatArrayToSort, int size, int threadCount) {
         return 0;
     }
     data.array = floatArrayToSort;
-
     int portion = size / threadCount;
     int remainder = size % threadCount;
+    int starts[threadCount];
+    int portions[threadCount];
     for (int i = 0; i < threadCount; i++) {
-        if (i <= remainder) {
+        if (i < remainder) {
             data.start = i * (portion + 1);
             data.end = data.start + portion + 1;
+            portions[i] = portion + 1;
         }
         else {
             data.start = portion*(i - remainder) + remainder*(portion + 1);
             data.end = data.start + portion;
+            portions[i] = portion;
         }
         if (pthread_create(&threads[i], NULL, (void*) mergesort_manager,&data)) {
             for (int j = 0; j < i; j++) {
                 pthread_join(threads[j], NULL);
             }
+            pthread_barrier_destroy(&data.syncBarrier);
             free(threads);
             return 0;
         }
         pthread_barrier_wait(&data.syncBarrier);
+        starts[i] = data.start;
     }
     for (int i = 0; i < threadCount; i++) {
         pthread_join(threads[i], NULL);
+    }
+    pthread_barrier_destroy(&data.syncBarrier);
+    free(threads);
+    /* Final merges */
+    int low, mid, high, temp;
+    low = 0;
+    high = portions[0]-1;
+    for (int i = 0; i < threadCount-1; i++) {
+        temp = portions[i+1]-1 + starts[i+1];
+        mid = high;
+        high = temp;
+        merge(floatArrayToSort, low, mid, high);
     }
     return 1;
 }
@@ -310,7 +332,7 @@ void mergesort_manager(struct MergesortData data) {
     int start = data.start;
     int end = data.end;
     pthread_barrier_wait(&data.syncBarrier);
-    mergesort(data.array, start, end);
+    mergesort(data.array, start, end-1);
 }
 
 void mergesort(float* array, int low, int high) {
@@ -332,7 +354,6 @@ void merge(float* floatArrayToSort, int low, int mid, int high) {
     for (j = 0; j < lengthOfB; j++) {
         b[j] = floatArrayToSort[j + mid + 1];
     }
-
     i = j = 0;
     k = low;
     while (i < lengthOfA && j < lengthOfB) {
@@ -365,7 +386,7 @@ int main() {
     for (int i = 0; i < size; i++) {
         array[i] = (float) rand() / (float) RAND_MAX;
     }
-    if (!bucketsort(array, size, 8, 10, 1)) { // not manager processor results
+    if (!bucketsort(array, size, 2, 2, 4)) {
         free(array);
         return 0;
     }
