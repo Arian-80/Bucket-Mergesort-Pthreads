@@ -42,7 +42,7 @@ void mergesort(float* array, int low, int high);
 void merge(float* floatArrayToSort, int low, int mid, int high);
 
 int bucketsort(float* floatArrayToSort, int arraySize, int threadCount,
-                        int bucketCount, int threadsPerThread) {
+               int bucketCount, int threadsPerThread) {
     /*
      * @param floatArrayToSort      Array to sort, self-descriptive
      * @param arraySize             Size of the array to sort
@@ -50,10 +50,15 @@ int bucketsort(float* floatArrayToSort, int arraySize, int threadCount,
      * @param threadsPerThread      Number of threads per thread to perform ..-
      *                              -.. parallel mergesort. 1 = sequential.
      */
-    if (bucketCount < 1 || threadCount < 1 || threadCount > bucketCount) {
+    if (bucketCount < 1 || threadCount < 1 || bucketCount > arraySize) {
         printf("Invalid input.\n");
         return 0;
     }
+    else if (bucketCount == 1) {
+        return mergesort_parallel(floatArrayToSort, arraySize, threadsPerThread);
+    }
+
+    if (threadCount > bucketCount) threadCount = bucketCount;
 
     struct Bucket* buckets = (struct Bucket*) malloc((size_t) bucketCount * sizeof(struct Bucket));
     if (!buckets) {
@@ -127,10 +132,9 @@ int bucketsort(float* floatArrayToSort, int arraySize, int threadCount,
         }
         pthread_barrier_wait(&data.syncBarrier);
     }
-    freeBuckets(buckets, bucketCount);
     pthread_barrier_destroy(&data.syncBarrier);
 
-    long long returnVal;
+    int returnVal;
     int errorOccurred = 0;
     for (int i = 0; i < threadCount; i++) {
         pthread_join(threads[i], (void**) &returnVal);
@@ -139,8 +143,9 @@ int bucketsort(float* floatArrayToSort, int arraySize, int threadCount,
             errorOccurred = 1;
         }
     }
-    free(threads);
 
+    free(buckets);
+    free(threads);
     if (!errorOccurred) {
         int k = 0;
         for (int i = 0; i < bucketCount; i++) {
@@ -153,7 +158,6 @@ int bucketsort(float* floatArrayToSort, int arraySize, int threadCount,
         free(numbersInBuckets);
         return 1;
     }
-    for (int i = 0; i < bucketCount; i++) free(numbersInBuckets[i]);
     free(numbersInBuckets);
     return 0;
 }
@@ -228,7 +232,6 @@ int sort_buckets(struct BucketsortData data) {
 
     /* Gather items in each bucket and store in a separate array */
     int itemsInBucket;
-    int result;
     struct Bucket* currentBucket;
     struct Bucket* prevBucket;
     for (int i = start; i < end; i++) {
@@ -238,7 +241,6 @@ int sort_buckets(struct BucketsortData data) {
         numbersInBuckets[i] = (float*) malloc(itemsInBucket * sizeof(float));
         if (!numbersInBuckets[i]) {
             for (int j = start; j < i; j++) free(numbersInBuckets[j]);
-            printf("An error has occurred.\n");
             return 0;
         }
         if (!itemsInBucket) {
@@ -252,20 +254,16 @@ int sort_buckets(struct BucketsortData data) {
             // Freeing buckets here saves the need to use another loop to do so.
             free(prevBucket);
         }
-        result = mergesort_parallel(numbersInBuckets[i],
-                                    itemsInBucket, data.extraThreads);
-        if (!result) return 0;
-        for (int j = 1; j < itemsInBucket; j++) {
-            if (numbersInBuckets[i][j] < numbersInBuckets[i][j-1]) {
-                printf("Bucket %d, index %d, values %f, %f, %f\n", i, j, numbersInBuckets[i][j], numbersInBuckets[i][j-1], numbersInBuckets[i][j+1]);
-            }
+        if (!mergesort_parallel(numbersInBuckets[i],
+                                    itemsInBucket, data.extraThreads)) {
+            return 0;
         }
     }
     return 1;
 }
 
 int mergesort_parallel(float* floatArrayToSort, int size, int threadCount) {
-    if (threadCount == 1) { // sequential
+    if (threadCount < 2) { // sequential for anything below 2.
         mergesort(floatArrayToSort, 0, size - 1);
         return 1;
     }
@@ -273,16 +271,15 @@ int mergesort_parallel(float* floatArrayToSort, int size, int threadCount) {
 
     pthread_t* threads = (pthread_t*) malloc(threadCount * sizeof(pthread_t));
     if (!threads) {
-        printf("An error has occurred.\n");
         return 0;
     }
 
     struct MergesortData data;
     if (pthread_barrier_init(&data.syncBarrier, NULL, 2)) {
         free(threads);
-        printf("An error has occurred.\n");
         return 0;
     }
+
     data.array = floatArrayToSort;
     int portion = size / threadCount;
     int remainder = size % threadCount;
@@ -299,6 +296,7 @@ int mergesort_parallel(float* floatArrayToSort, int size, int threadCount) {
             data.end = data.start + portion;
             portions[i] = portion;
         }
+        starts[i] = data.start;
         if (pthread_create(&threads[i], NULL, (void*) mergesort_manager,&data)) {
             for (int j = 0; j < i; j++) {
                 pthread_join(threads[j], NULL);
@@ -308,7 +306,6 @@ int mergesort_parallel(float* floatArrayToSort, int size, int threadCount) {
             return 0;
         }
         pthread_barrier_wait(&data.syncBarrier);
-        starts[i] = data.start;
     }
     for (int i = 0; i < threadCount; i++) {
         pthread_join(threads[i], NULL);
@@ -386,7 +383,7 @@ int main() {
     for (int i = 0; i < size; i++) {
         array[i] = (float) rand() / (float) RAND_MAX;
     }
-    if (!bucketsort(array, size, 2, 2, 4)) {
+    if (!bucketsort(array, size, 2, 10, 4)) {
         free(array);
         return 0;
     }
