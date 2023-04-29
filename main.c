@@ -187,7 +187,6 @@ void freeBuckets(struct Bucket* buckets, int bucketCount) {
 int fillBuckets(const float* floatArrayToSort, int size, struct Bucket* buckets, int bucketCount) {
     float currentItem;
     struct Bucket *bucket;
-    float bucketLimit = 0.1 * bucketCount;
     for (int i = 0; i < size; i++) {
         currentItem = floatArrayToSort[i];
         if (currentItem < 0) {
@@ -195,7 +194,8 @@ int fillBuckets(const float* floatArrayToSort, int size, struct Bucket* buckets,
             printf("Invalid input: Negative numbers.\n");
             return 0; // No negative numbers allowed
         }
-        if (currentItem < bucketLimit) {
+        // ASSUMES NUMBERS WILL BE FROM 0 TO 1. EXPLAIN IN DISS - OVERVIEW OF ALGORITHM. IF NUMBERS ABOVE 1, PERFORMANCE = BAD.
+        if (currentItem < 0.9) {
             bucket = &(buckets[(int) (currentItem * 10)]);
         } else { // If larger than limit, store in the final bucket
             bucket = &buckets[bucketCount-1];
@@ -205,19 +205,18 @@ int fillBuckets(const float* floatArrayToSort, int size, struct Bucket* buckets,
             bucket->value = currentItem;
             continue;
         }
-        while (bucket->next != NULL) {
-            bucket = bucket->next;
-        }
+
         struct Bucket *newBucket = (struct Bucket *)
                 malloc(sizeof(struct Bucket));
         if (newBucket == NULL) {
             freeBuckets(buckets, bucketCount);
             return 0;
         }
+        newBucket->next = bucket->next;
         bucket->next = newBucket;
+
         newBucket->value = currentItem;
-        newBucket->next = NULL;
-        newBucket->count = 0;
+        newBucket->count = 1;
     }
     return 1;
 }
@@ -344,7 +343,19 @@ void merge(float* floatArrayToSort, int low, int mid, int high) {
     int i, j, k;
     int lengthOfA = mid - low + 1; // low -> mid, inclusive
     int lengthOfB = high - mid;
-    float a[lengthOfA], b[lengthOfB];
+    float *a, *b;
+    a = malloc(lengthOfA * sizeof(float));
+    if (a) {
+        b = malloc(lengthOfB * sizeof(float));
+        if (!b) {
+            free(a);
+            return;
+        }
+    }
+    else {
+        return;
+    }
+
     for (i = 0; i < lengthOfA; i++) {
         a[i] = floatArrayToSort[i + low];
     }
@@ -372,30 +383,44 @@ void merge(float* floatArrayToSort, int low, int mid, int high) {
         floatArrayToSort[k] = b[j];
         k++;
     }
+    free(a); free(b);
 }
 
 int main() {
-    int size = 25000;
-    float* array = (float*) malloc((size_t) size * sizeof(float));
-    if (array == NULL) return -1;
-    time_t t;
-    srand((unsigned) time(&t));
-    for (int i = 0; i < size; i++) {
-        array[i] = (float) rand() / (float) RAND_MAX;
-    }
-    if (!bucketsort(array, size, 2, 10, 4)) {
+    for (int k = 1; k < 9; k++) {
+        if (k == 3) k = 4;
+        if (k == 5) k = 6;
+        if (k == 7) k = 8;
+        int size = 10000000;
+        float *array = (float *) malloc((size_t) size * sizeof(float));
+        if (array == NULL) return -1;
+        time_t t;
+        srand((unsigned) time(&t));
+        for (int i = 0; i < size; i++) {
+            array[i] = (float) rand() / (float) RAND_MAX;
+        }
+        int result;
+        clock_t start, end;
+        start = clock();
+        result = bucketsort(array, size, 1, 1, k);
+        end = clock();
+        if (!result) {
+            free(array);
+            return 0;
+        }
+        int incorrectCounter, correctCounter;
+        incorrectCounter = correctCounter = 0;
+        for (int i = 1; i < size; i++) {
+            if (array[i] < array[i - 1]) incorrectCounter++;
+            else correctCounter++;
+        }
+        correctCounter++; // final unaccounted number
+        printf("Sorted numbers: %d\nIncorrectly sorted numbers: %d\nTotal numbers: %d\n",
+               correctCounter, incorrectCounter, size);
+        printf("Time taken: %g seconds\n", (double)(end-start) / CLOCKS_PER_SEC);
+        FILE *f = fopen("times.txt", "a");
+        fprintf(f, "%g,", (double)(end-start) / CLOCKS_PER_SEC);
         free(array);
-        return 0;
     }
-    int incorrectCounter, correctCounter;
-    incorrectCounter = correctCounter = 0;
-    for (int i = 1; i < size; i++) {
-        if (array[i] < array[i-1]) incorrectCounter++;
-        else correctCounter++;
-    }
-    correctCounter++; // final unaccounted number
-    printf("Sorted numbers: %d\nIncorrectly sorted numbers: %d\nTotal numbers: %d\n",
-           correctCounter, incorrectCounter, size);
-    free(array);
     return 0;
 }
