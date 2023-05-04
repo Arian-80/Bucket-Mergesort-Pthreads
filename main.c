@@ -54,7 +54,7 @@ int bucketsort(float* floatArrayToSort, int arraySize, int threadCount,
         printf("Invalid input.\n");
         return 0;
     }
-    else if (bucketCount == 1) {
+    else if (bucketCount == 1) { // Sequential
         return mergesort_parallel(floatArrayToSort, arraySize, threadsPerThread);
     }
 
@@ -110,6 +110,7 @@ int bucketsort(float* floatArrayToSort, int arraySize, int threadCount,
     data.sizes = sizes;
     data.extraThreads = threadsPerThread;
     for (int i = 0; i < threadCount; i++) {
+        // Sort buckets in parallel
         if (i < remainder) {
             data.start = i * (portion + 1);
             data.end = data.start + portion + 1;
@@ -194,10 +195,10 @@ int fillBuckets(const float* floatArrayToSort, int size, struct Bucket* buckets,
             printf("Invalid input: Negative numbers.\n");
             return 0; // No negative numbers allowed
         }
-        // ASSUMES NUMBERS WILL BE FROM 0 TO 1. EXPLAIN IN DISS - OVERVIEW OF ALGORITHM. IF NUMBERS ABOVE 1, PERFORMANCE = BAD.
-        if (currentItem < 0.9) {
-            bucket = &(buckets[(int) (currentItem * 10)]);
-        } else { // If larger than limit, store in the final bucket
+        // Assumes the majority of numbers are between 0 and 1.
+        if (currentItem < (float) (bucketCount - 1) / (float) bucketCount) {
+            bucket = &(buckets[(int) (currentItem * (float) bucketCount)]);
+        } else { // Store in final bucket
             bucket = &buckets[bucketCount-1];
         }
         bucket->count++;
@@ -206,6 +207,7 @@ int fillBuckets(const float* floatArrayToSort, int size, struct Bucket* buckets,
             continue;
         }
 
+        // Insert new bucket
         struct Bucket *newBucket = (struct Bucket *)
                 malloc(sizeof(struct Bucket));
         if (newBucket == NULL) {
@@ -249,10 +251,10 @@ int sort_buckets(struct BucketsortData data) {
             numbersInBuckets[i][j] = currentBucket->value;
             prevBucket = currentBucket;
             currentBucket = currentBucket->next;
-            if (j == 0) continue; // first bucket allocated on stack
-            // Freeing buckets here saves the need to use another loop to do so.
+            if (j == 0) continue; // First bucket allocated on stack
             free(prevBucket);
         }
+        // Sort bucket
         if (!mergesort_parallel(numbersInBuckets[i],
                                     itemsInBucket, data.extraThreads)) {
             return 0;
@@ -262,7 +264,7 @@ int sort_buckets(struct BucketsortData data) {
 }
 
 int mergesort_parallel(float* floatArrayToSort, int size, int threadCount) {
-    if (threadCount < 2) { // sequential for anything below 2.
+    if (threadCount < 2) { // Sequential
         mergesort(floatArrayToSort, 0, size - 1);
         return 1;
     }
@@ -285,6 +287,7 @@ int mergesort_parallel(float* floatArrayToSort, int size, int threadCount) {
     int starts[threadCount];
     int portions[threadCount];
     for (int i = 0; i < threadCount; i++) {
+        // Perform mergesort on array
         if (i < remainder) {
             data.start = i * (portion + 1);
             data.end = data.start + portion + 1;
@@ -325,6 +328,7 @@ int mergesort_parallel(float* floatArrayToSort, int size, int threadCount) {
 }
 
 void mergesort_manager(struct MergesortData data) {
+    // Perform mergesort on unique range
     int start = data.start;
     int end = data.end;
     pthread_barrier_wait(&data.syncBarrier);
@@ -332,16 +336,17 @@ void mergesort_manager(struct MergesortData data) {
 }
 
 void mergesort(float* array, int low, int high) {
+    // Ordinary mergesort
     if (low >= high) return;
     int mid = low + (high - low)/2;
-    mergesort(array, low, mid); // low -> mid inclusive
+    mergesort(array, low, mid);
     mergesort(array, mid + 1, high);
     merge(array, low, mid, high);
 }
 
 void merge(float* floatArrayToSort, int low, int mid, int high) {
     int i, j, k;
-    int lengthOfA = mid - low + 1; // low -> mid, inclusive
+    int lengthOfA = mid - low + 1;
     int lengthOfB = high - mid;
     float *a, *b;
     a = malloc(lengthOfA * sizeof(float));
@@ -349,10 +354,12 @@ void merge(float* floatArrayToSort, int low, int mid, int high) {
         b = malloc(lengthOfB * sizeof(float));
         if (!b) {
             free(a);
+            printf("An error has occurred.\n");
             return;
         }
     }
     else {
+        printf("An error has occurred.\n");
         return;
     }
 
@@ -387,40 +394,35 @@ void merge(float* floatArrayToSort, int low, int mid, int high) {
 }
 
 int main() {
-    for (int k = 1; k < 9; k++) {
-        if (k == 3) k = 4;
-        if (k == 5) k = 6;
-        if (k == 7) k = 8;
-        int size = 10000000;
-        float *array = (float *) malloc((size_t) size * sizeof(float));
-        if (array == NULL) return -1;
-        time_t t;
-        srand((unsigned) time(&t));
-        for (int i = 0; i < size; i++) {
-            array[i] = (float) rand() / (float) RAND_MAX;
-        }
-        int result;
-        clock_t start, end;
-        start = clock();
-        result = bucketsort(array, size, 1, 1, k);
-        end = clock();
-        if (!result) {
-            free(array);
-            return 0;
-        }
-        int incorrectCounter, correctCounter;
-        incorrectCounter = correctCounter = 0;
-        for (int i = 1; i < size; i++) {
-            if (array[i] < array[i - 1]) incorrectCounter++;
-            else correctCounter++;
-        }
-        correctCounter++; // final unaccounted number
-        printf("Sorted numbers: %d\nIncorrectly sorted numbers: %d\nTotal numbers: %d\n",
-               correctCounter, incorrectCounter, size);
-        printf("Time taken: %g seconds\n", (double)(end-start) / CLOCKS_PER_SEC);
-        FILE *f = fopen("times.txt", "a");
-        fprintf(f, "%g,", (double)(end-start) / CLOCKS_PER_SEC);
-        free(array);
+    int size = 10000000;
+    float *array = (float *) malloc((size_t) size * sizeof(float));
+    if (array == NULL) return -1;
+    time_t t;
+    srand((unsigned) time(&t));
+    for (int i = 0; i < size; i++) {
+        array[i] = (float) rand() / (float) RAND_MAX;
     }
+    int result;
+    clock_t start, end;
+    start = clock();
+    result = bucketsort(array, size, 8, 20, 1);
+    end = clock();
+    if (!result) {
+        free(array);
+        return 0;
+    }
+    int incorrectCounter, correctCounter;
+    incorrectCounter = correctCounter = 0;
+    for (int i = 1; i < size; i++) {
+        if (array[i] < array[i - 1]) incorrectCounter++;
+        else correctCounter++;
+    }
+    correctCounter++; // final unaccounted number
+    printf("Sorted numbers: %d\nIncorrectly sorted numbers: %d\nTotal numbers: %d\n",
+           correctCounter, incorrectCounter, size);
+    printf("Time taken: %g seconds\n", (double)(end-start) / CLOCKS_PER_SEC);
+    FILE *f = fopen("times.txt", "a");
+    fprintf(f, "%g,", (double)(end-start) / CLOCKS_PER_SEC);
+    free(array);
     return 0;
 }
